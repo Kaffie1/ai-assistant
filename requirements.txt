@@ -1,0 +1,16 @@
+# Core LangChain
+langchain-core==1.2.20
+langchain-openai==1.1.11
+
+# Vector store (Chroma)
+langchain-chroma==1.1.0
+chromadb==1.5.5
+
+# Embeddings (HuggingFace)
+langchain-huggingface==1.2.1
+sentence-transformers==5.3.0
+
+# Web API
+fastapi==0.135.3
+uvicorn==0.42.0
+pydantic==2.12.5

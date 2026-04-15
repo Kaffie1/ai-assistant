@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Assistant Web Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <div class="bg"></div>
+    <main class="layout">
+      <section class="panel head">
+        <h1>秘书型 AI 助手</h1>
+        <p>浏览器问答版，已接入记忆检索 + 自学习。</p>
+        <span id="modeBadge" class="badge">连接中...</span>
+      </section>
+
+      <section id="chatBox" class="panel chat"></section>
+
+      <section class="panel composer">
+        <div class="chips">
+          <button class="chip" data-text="以后默认中文回答，风格简洁。">默认中文+简洁</button>
+          <button class="chip" data-text="/profile list">查看画像</button>
+          <button class="chip" data-text="/knowledge list">查看知识</button>
+          <button class="chip" data-text="/todo list">查看待办</button>
+          <button class="chip" data-text="/todo done tf_">完成待办</button>
+        </div>
+        <div class="inputRow">
+          <textarea id="input" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+          <button id="sendBtn">发送</button>
+        </div>
+        <div id="learnMeta" class="learnMeta"></div>
+      </section>
+    </main>
+    <script src="/web/app.js"></script>
+  </body>
+  </html>
