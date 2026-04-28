@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from capabilities.memory.store.core import build_fact_store_stack
 from gateway import CliGateway
 from foundation.logger import get_backend_logger, setup_backend_logging
-from runtime import AppRuntime, ToolRuntime
-from workflow import configure_assistant_runtime
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,17 +22,9 @@ def run_chat() -> None:
     输入：无。
     输出：无，副作用是持续打印回复并写入记忆/事实库。
     """
-    fact_store_stack = build_fact_store_stack()
-    runtime = AppRuntime(
-        logger_name="chat_cli",
-        fact_store_stack=fact_store_stack,
-    )
-    tool_runtime = ToolRuntime()
-    configure_assistant_runtime(source="cli", app_runtime=runtime, tool_runtime=tool_runtime)
     gateway = CliGateway()
 
     print("AI 助手已启动（单用户模式）。输入内容开始对话，输入 `exit` 退出。")
-    print(f"回复模式：{'LLM' if runtime.llm is not None else 'Local Fallback'}")
     print("当前为自然语言工具调用模式。直接描述你的需求即可；高风险操作会要求你确认。")
     print()
 

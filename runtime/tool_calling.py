@@ -4,17 +4,7 @@ import json
 import re
 from typing import Any
 
-from runtime.pending_actions import (
-    clear_pending_action,
-    create_pending_action,
-    get_pending_action,
-    is_cancel_text,
-    is_confirm_text,
-)
-from runtime.tools.base import PendingAction, ToolBatchResult, ToolCall, ToolContext, ToolRegistry, ToolResult
-from runtime.tools.profile_tool import normalize_profile_delete_call
-from runtime.tools.remind_tool import normalize_remind_delete_call
-from runtime.tools.todo_tool import normalize_todo_delete_call, normalize_todo_done_call
+from runtime.tools.base import ToolBatchResult, ToolCall, ToolContext, ToolRegistry, ToolResult
 from prompts.tool_router import build_tool_result_reply_prompt, build_tool_selection_prompt
 
 try:
@@ -22,6 +12,26 @@ try:
 except Exception:  # pragma: no cover
     HumanMessage = None  # type: ignore[assignment]
     SystemMessage = None  # type: ignore[assignment]
+
+
+def is_confirm_text(text: str) -> bool:
+    """
+    功能：判断输入是否表示确认执行。
+    输入：用户文本 `text`。
+    输出：确认返回 `True`，否则返回 `False`。
+    """
+    normalized = (text or "").strip().lower()
+    return normalized in {"确认", "执行", "继续", "是", "好的", "好", "yes", "ok", "确认执行"}
+
+
+def is_cancel_text(text: str) -> bool:
+    """
+    功能：判断输入是否表示取消待执行操作。
+    输入：用户文本 `text`。
+    输出：取消返回 `True`，否则返回 `False`。
+    """
+    normalized = (text or "").strip().lower()
+    return normalized in {"取消", "不用了", "否", "不", "停止", "先不要", "cancel", "no"}
 
 
 def build_tool_catalog_for_llm(registry: ToolRegistry) -> str:
@@ -167,7 +177,7 @@ def needs_confirmation(tool_calls: list[ToolCall], registry: ToolRegistry) -> bo
     return False
 
 
-def _summarize_batch_results(batch_result: ToolBatchResult) -> str:
+def _summarize_batch_results(batch_result: ToolBatchResult, registry: ToolRegistry) -> str:
     """
     功能：把批量工具执行结果汇总成简洁文本。
     输入：批量执行结果 `batch_result`。
@@ -183,15 +193,10 @@ def _summarize_batch_results(batch_result: ToolBatchResult) -> str:
     success_count = sum(1 for result in results if result.ok)
     failed_count = len(results) - success_count
     same_tool = len({result.tool for result in results}) == 1
-    label_map = {
-        "profile_delete": "画像",
-        "remind_delete": "提醒",
-        "todo_delete": "任务",
-        "todo_done": "任务",
-    }
     noun = ""
     if same_tool:
-        noun = label_map.get(results[0].tool, "项目")
+        manifest = registry.get_manifest(results[0].tool)
+        noun = (manifest.object_label if manifest is not None else "") or "项目"
     head = f"已成功处理 {success_count} 项"
     if noun:
         head = f"已成功处理 {success_count} 条{noun}"
@@ -207,21 +212,15 @@ def _summarize_batch_results(batch_result: ToolBatchResult) -> str:
     return "\n".join(detail_lines)
 
 
-def _normalize_tool_calls(tool_calls: list[ToolCall], ctx: ToolContext) -> list[ToolCall]:
+def _normalize_tool_calls(tool_calls: list[ToolCall], ctx: ToolContext, registry: ToolRegistry) -> list[ToolCall]:
     """
     功能：在执行前把批量工具调用参数归一化，冻结同批次的引用快照。
-    输入：工具调用列表 `tool_calls`、工具上下文 `ctx`。
+    输入：工具调用列表 `tool_calls`、工具上下文 `ctx`、工具注册表 `registry`。
     输出：归一化后的工具调用列表。
     """
-    normalizers = {
-        "remind_delete": normalize_remind_delete_call,
-        "profile_delete": normalize_profile_delete_call,
-        "todo_delete": normalize_todo_delete_call,
-        "todo_done": normalize_todo_done_call,
-    }
     normalized: list[ToolCall] = []
     for tool_call in tool_calls:
-        normalizer = normalizers.get(tool_call.tool)
+        normalizer = registry.get_normalizer(tool_call.tool)
         normalized.append(normalizer(tool_call, ctx) if normalizer else tool_call)
     return normalized
 
@@ -229,6 +228,7 @@ def _normalize_tool_calls(tool_calls: list[ToolCall], ctx: ToolContext) -> list[
 def compose_tool_result_reply_with_llm(
     *,
     llm: Any | None,
+    registry: ToolRegistry,
     user_text: str,
     profile_ctx: str,
     memory_ctx: str,
@@ -241,13 +241,8 @@ def compose_tool_result_reply_with_llm(
     输出：自然语言回复文本。
     """
     fallback = tool_result.display_text or ("执行成功。" if tool_result.ok else f"执行失败：{tool_result.error}")
-    if tool_result.tool in {
-        "remind_add",
-        "remind_delete",
-        "profile_delete",
-        "todo_delete",
-        "todo_done",
-    }:
+    manifest = registry.get_manifest(tool_result.tool)
+    if manifest is not None and manifest.direct_response:
         return fallback
     if llm is None:
         return fallback
@@ -287,55 +282,66 @@ def compose_tool_result_reply_with_llm(
     return fallback
 
 
-def try_resume_pending_action(
+def build_confirmation_message(tool_calls: list[ToolCall], manifests: list[Any]) -> str:
+    """
+    功能：为批量高风险操作生成统一确认文案。
+    输入：工具调用列表 `tool_calls` 与对应 manifest 列表 `manifests`。
+    输出：面向用户的确认文本。
+    """
+    if len(tool_calls) == 1:
+        manifest = manifests[0]
+        return manifest.confirm_message.strip() or f"将执行 {tool_calls[0].tool}，是否确认？"
+    same_tool = len({call.tool for call in tool_calls}) == 1
+    if same_tool:
+        manifest = manifests[0]
+        action_name = manifest.description.strip() or tool_calls[0].tool
+        return f"将批量执行 {len(tool_calls)} 项操作（{action_name}），是否确认？"
+    return f"将批量执行 {len(tool_calls)} 项高风险操作，是否确认？"
+
+
+def execute_tool_calls(
     *,
-    user_text: str,
+    tool_calls: list[ToolCall],
     registry: ToolRegistry,
     ctx: ToolContext,
     llm: Any | None,
+    user_text: str,
     profile_ctx: str,
     memory_ctx: str,
     recent_ctx: str,
-) -> str | None:
+) -> str:
     """
-    功能：处理高风险工具调用的确认或取消。
-    输入：用户文本、工具注册表、上下文、LLM、画像上下文、记忆上下文。
-    输出：若命中确认流则返回回复文本，否则返回 `None`。
+    功能：执行一批已确认的工具调用并生成最终回复。
+    输入：工具调用列表、注册表、上下文、LLM 与会话上下文。
+    输出：工具执行后的回复文本。
     """
-    pending = get_pending_action()
-    if pending is None:
-        return None
-    if is_cancel_text(user_text):
-        clear_pending_action()
-        return "已取消刚才待执行的操作。"
-    if not is_confirm_text(user_text):
-        return None
-    clear_pending_action()
     batch_result = registry.execute_calls(
         [
             ToolCall(
                 tool=tool_call.tool,
                 arguments=dict(tool_call.arguments),
                 confidence=1.0,
+                raw=tool_call.raw,
                 source="confirm",
             )
-            for tool_call in pending.tool_calls
+            for tool_call in tool_calls
         ],
         ctx,
     )
     if len(batch_result.results) == 1:
         return compose_tool_result_reply_with_llm(
             llm=llm,
+            registry=registry,
             user_text=user_text,
             profile_ctx=profile_ctx,
             memory_ctx=memory_ctx,
             recent_ctx=recent_ctx,
             tool_result=batch_result.results[0],
         )
-    return _summarize_batch_results(batch_result)
+    return _summarize_batch_results(batch_result, registry)
 
 
-def try_handle_tool_call(
+def prepare_tool_calls(
     *,
     user_text: str,
     registry: ToolRegistry,
@@ -344,24 +350,12 @@ def try_handle_tool_call(
     profile_ctx: str,
     memory_ctx: str,
     recent_ctx: str,
-) -> str | None:
+) -> tuple[list[ToolCall], bool, str]:
     """
-    功能：尝试走统一工具调用主流程。
+    功能：准备本轮工具调用，并判断是否需要确认。
     输入：用户文本、工具注册表、上下文、LLM、画像上下文、记忆上下文。
-    输出：若由工具链处理则返回文本结果，否则返回 `None`。
+    输出：`(归一化工具调用列表, 是否需要确认, 确认文案)`。
     """
-    resumed = try_resume_pending_action(
-        user_text=user_text,
-        registry=registry,
-        ctx=ctx,
-        llm=llm,
-        profile_ctx=profile_ctx,
-        memory_ctx=memory_ctx,
-        recent_ctx=recent_ctx,
-    )
-    if resumed is not None:
-        return resumed
-
     tool_calls = select_tool_call_with_llm(
         llm=llm,
         user_text=user_text,
@@ -371,7 +365,7 @@ def try_handle_tool_call(
         registry=registry,
     )
     if not tool_calls:
-        return None
+        return [], False, ""
 
     validated_calls: list[ToolCall] = []
     for tool_call in tool_calls:
@@ -379,27 +373,14 @@ def try_handle_tool_call(
         if ok:
             validated_calls.append(tool_call)
     if not validated_calls:
-        return None
+        return [], False, ""
 
     manifests = [registry.get_manifest(tool_call.tool) for tool_call in validated_calls]
     manifests = [manifest for manifest in manifests if manifest is not None]
     if not manifests:
-        return None
+        return [], False, ""
 
-    normalized_calls = _normalize_tool_calls(validated_calls, ctx)
-
-    if needs_confirmation(normalized_calls, registry):
-        pending = create_pending_action(normalized_calls, manifests)
-        return f"{pending.confirm_message}\n\n回复“确认”执行，回复“取消”放弃。"
-
-    batch_result = registry.execute_calls(normalized_calls, ctx)
-    if len(batch_result.results) == 1:
-        return compose_tool_result_reply_with_llm(
-            llm=llm,
-            user_text=user_text,
-            profile_ctx=profile_ctx,
-            memory_ctx=memory_ctx,
-            recent_ctx=recent_ctx,
-            tool_result=batch_result.results[0],
-        )
-    return _summarize_batch_results(batch_result)
+    normalized_calls = _normalize_tool_calls(validated_calls, ctx, registry)
+    require_confirmation = needs_confirmation(normalized_calls, registry)
+    confirm_message = build_confirmation_message(normalized_calls, manifests) if require_confirmation else ""
+    return normalized_calls, require_confirmation, confirm_message

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
-from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+
+from pydantic import BaseModel, Field
 
 from .tools.base import ToolContext, ToolManifest, ToolRegistry
 
@@ -12,10 +13,10 @@ _TOOLS_PACKAGE = "runtime.tools"
 _TOOLS_DIR = Path(__file__).with_name("tools")
 
 
-@dataclass(slots=True)
-class _RegistrySnapshot:
+class _RegistrySnapshot(BaseModel):
     """记录工具文件快照，用于判断是否需要热刷新。"""
-    files: dict[str, int]
+
+    files: dict[str, int] = Field(default_factory=dict, description="工具文件到修改时间的映射。")
 
 
 def _iter_tool_module_names() -> list[str]:
@@ -96,6 +97,10 @@ def _register_module_tools(registry: ToolRegistry, module: ModuleType) -> None:
             handler = getattr(module, handler_name, None)
             if callable(handler):
                 registry.register(action, handler, manifest)
+            normalizer_name = f"normalize_{action}_call"
+            normalizer = getattr(module, normalizer_name, None)
+            if callable(normalizer):
+                registry.register_normalizer(action, normalizer)
 
 
 class AutoReloadToolRegistry:

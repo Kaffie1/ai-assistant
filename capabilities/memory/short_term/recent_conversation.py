@@ -165,6 +165,7 @@ def build_recent_conversation() -> str:
     输入：无。
     输出：可直接注入 Prompt 的最近对话文本；无内容时返回空字符串。
     """
+    global _SHORT_TERM_CONTEXT
     with _STORE_LOCK:
         if _SHORT_TERM_CONTEXT == "":
             _SHORT_TERM_CONTEXT = _load_messages()
@@ -177,6 +178,8 @@ def append_recent_conversation(text: str) -> None:
     输入：单段短期对话文本 `text`。
     输出：无，副作用是把改写后的 JSON 记录追加写入当天文件。
     """
+
+    global _SHORT_TERM_CONTEXT
     message = _parse_message_record(text)
     if not message["user"] and not message["assistant"]:
         return

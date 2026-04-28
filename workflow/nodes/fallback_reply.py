@@ -5,26 +5,31 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from workflow.deps import AssistantGraphDeps
-from workflow.state import State
 from prompts import build_chat_system_prompt
+from workflow.nodes.services import get_llm, get_logger
+from workflow.state import State
 
 
 def _generate_reply(user_text: str, profile_ctx: str) -> str:
+    """
+    功能：生成本地兜底回复。
+    输入：用户输入 `user_text`、画像上下文 `profile_ctx`。
+    输出：兜底回复文本。
+    """
     if any(k in user_text for k in ("你是谁", "你是干嘛的", "你能做什么")):
         return "我是你的定制化 AI 助手（秘书型）。我会学习你的偏好并持续个性化。"
     if any(k in user_text for k in ("你记住了什么", "我的偏好", "画像")):
         return f"我当前记住的画像如下：\n{profile_ctx}" if profile_ctx else "我还没有稳定画像。"
-    return "我已收到，这条信息会进入学习管道并用于后续个性化回答。"
+    return "我已收到，这条信息会进入后续对话上下文。"
 
 
-def _generate_reply_with_llm(
-    llm: Any,
-    user_text: str,
-    profile_ctx: str,
-    recent_ctx: str = "",
-) -> str:
-    system_text = build_chat_system_prompt(profile_ctx=profile_ctx, memory_ctx="", recent_ctx=recent_ctx)
+def _generate_reply_with_llm(llm: Any, user_text: str, profile_ctx: str, memory_ctx: str = "", recent_ctx: str = "") -> str:
+    """
+    功能：调用聊天模型生成回复。
+    输入：模型实例 `llm`、用户输入 `user_text`、画像上下文 `profile_ctx`、短期上下文 `recent_ctx`。
+    输出：模型生成的回复文本。
+    """
+    system_text = build_chat_system_prompt(profile_ctx=profile_ctx, memory_ctx=memory_ctx, recent_ctx=recent_ctx)
     resp = llm.invoke([SystemMessage(content=system_text), HumanMessage(content=user_text)])
     content = getattr(resp, "content", "")
     if isinstance(content, str):
@@ -43,24 +48,30 @@ def _generate_reply_with_llm(
     return "我暂时没有生成到有效回复，请你再说一次。"
 
 
-def fallback_reply_node(state: State, deps: AssistantGraphDeps) -> State:
+def fallback_reply_node(state: State) -> State:
+    """
+    功能：执行普通回复节点。
+    输入：当前流程状态 `state`。
+    输出：写回 `reply_text` 和 `reply_ms` 的状态增量。
+    """
     t_reply_start = perf_counter()
     user_text = str(state.get("user_text", "") or "")
     profile_ctx = str(state.get("profile_ctx", "") or "")
+    memory_ctx = str(state.get("memory_ctx", "") or "")
     recent_ctx = str(state.get("recent_ctx", "") or "")
-    if deps.app_runtime.llm is not None:
+    llm = get_llm()
+    if llm is not None:
         try:
             assistant_text = _generate_reply_with_llm(
-                llm=deps.app_runtime.llm,
+                llm=llm,
                 user_text=user_text,
                 profile_ctx=profile_ctx,
+                memory_ctx=memory_ctx,
                 recent_ctx=recent_ctx,
             )
         except Exception as exc:
-            if deps.app_runtime.logger is not None:
-                deps.app_runtime.logger.exception("chat llm invoke failed, fallback to local")
-            else:
-                print(f"[warn] LLM 调用失败，已回退本地兜底回复: {type(exc).__name__}: {exc}")
+            get_logger().exception("chat llm invoke failed, fallback to local")
+            _ = exc
             assistant_text = _generate_reply(user_text=user_text, profile_ctx=profile_ctx)
     else:
         assistant_text = _generate_reply(user_text=user_text, profile_ctx=profile_ctx)

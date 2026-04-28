@@ -12,8 +12,8 @@
 ### 快速开始
 
 ```bash
-conda run --no-capture-output -n langchain python chat_cli.py
-conda run --no-capture-output -n langchain uvicorn web_app:app --host 0.0.0.0 --port 8000
+conda run --no-capture-output -n langchain python entrypoints/chat_cli.py
+conda run --no-capture-output -n langchain uvicorn entrypoints.web_app:app --host 0.0.0.0 --port 8000
 ```
 
 运行后会看到 `Vector Mode`：

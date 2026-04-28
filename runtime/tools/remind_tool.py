@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from capabilities.memory.store.core import ReminderFact
+from capabilities.memory.store.reminder_store import ReminderFact
 from capabilities.memory.store.time_parser import resolve_due_date, resolve_remind_at
 from foundation.time_utils import now_beijing
 
@@ -174,7 +174,7 @@ def handle_remind_add(match: re.Match[str], ctx: ToolContext) -> ToolResult:
     )
 
 
-def handle_remind_list(_match: re.Match[str], ctx: ToolContext) -> str:
+def handle_remind_list(_match: re.Match[str], ctx: ToolContext) -> ToolResult:
     """
     功能：列出当前未删除的提醒。
     输入：命令匹配结果 `_match`、工具上下文 `ctx`。
@@ -182,10 +182,10 @@ def handle_remind_list(_match: re.Match[str], ctx: ToolContext) -> str:
     """
     store = _remind_store(ctx)
     if store is None:
-        return "[Remind] unavailable"
+        return ToolResult(ok=False, tool="remind_list", error="unavailable", display_text="[Remind] unavailable")
     facts = _ordered_reminders(ctx)
     if not facts:
-        return "[Remind] empty"
+        return ToolResult(ok=True, tool="remind_list", display_text="[Remind] empty", data={"items": []})
     lines = ["[Remind]"]
     for idx, fact in enumerate(facts, start=1):
         date_part = f" | date={fact.remind_date}" if fact.remind_date else ""
@@ -193,7 +193,24 @@ def handle_remind_list(_match: re.Match[str], ctx: ToolContext) -> str:
         lines.append(
             f"- #{idx} | {fact.id} | when={fact.remind_text}{date_part}{at_part} | conf={fact.confidence:.2f} | {fact.content}"
         )
-    return "\n".join(lines)
+    return ToolResult(
+        ok=True,
+        tool="remind_list",
+        display_text="\n".join(lines),
+        data={
+            "items": [
+                {
+                    "id": fact.id,
+                    "content": fact.content,
+                    "remind_text": fact.remind_text,
+                    "remind_date": fact.remind_date,
+                    "remind_at": fact.remind_at,
+                    "confidence": fact.confidence,
+                }
+                for fact in facts
+            ]
+        },
+    )
 
 
 def handle_remind_delete(match: re.Match[str], ctx: ToolContext) -> ToolResult:
@@ -232,6 +249,7 @@ REMIND_MANIFESTS: dict[str, ToolManifest] = {
         "remind_add",
         description="新增一条提醒，格式为时间表达 | 提醒内容。",
         action="remind_add",
+        object_label="提醒",
         command_pattern="/remind add <time_expr> | <content>",
         intent_examples=["提醒我明天开会", "新增提醒", "设一个提醒"],
         tags=["reminder", "create", "write"],
@@ -242,11 +260,13 @@ REMIND_MANIFESTS: dict[str, ToolManifest] = {
         args_schema={"time_expr": "提醒时间表达", "content": "提醒内容"},
         confirm_required=False,
         confirm_message="",
+        direct_response=True,
     ),
     "remind_list": build_manifest(
         "remind_list",
         description="查看当前未删除的提醒。",
         action="remind_list",
+        object_label="提醒",
         command_pattern="/remind list",
         intent_examples=["查看提醒", "我有哪些提醒", "提醒列表"],
         tags=["reminder", "list", "read"],
@@ -254,11 +274,13 @@ REMIND_MANIFESTS: dict[str, ToolManifest] = {
         arg_names=[],
         required_args=[],
         args_schema={},
+        direct_response=False,
     ),
     "remind_delete": build_manifest(
         "remind_delete",
         description="删除一条提醒。",
         action="remind_delete",
+        object_label="提醒",
         command_pattern="/remind delete <id>",
         intent_examples=["删除提醒", "移除这个提醒", "删除第一个提醒", "删掉第2条提醒"],
         tags=["reminder", "delete", "write"],
@@ -269,5 +291,6 @@ REMIND_MANIFESTS: dict[str, ToolManifest] = {
         args_schema={"id": "提醒 ID 或序号，支持 rf_xxx、1、第一个等"},
         confirm_required=False,
         confirm_message="",
+        direct_response=True,
     ),
 }

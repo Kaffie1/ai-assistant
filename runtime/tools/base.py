@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from capabilities.memory.store.core import ReminderStoreProtocol, TaskStoreProtocol
-from foundation.time_utils import now_beijing
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,11 +10,8 @@ class ToolContext(BaseModel):
     """工具执行上下文，封装事实存储与辅助函数。"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    task_store: TaskStoreProtocol = Field(description="任务事实存储。")
-    remind_store: ReminderStoreProtocol = Field(description="提醒事实存储。")
-
-
-ToolHandler = Callable[[re.Match[str], ToolContext], str]
+    task_store: Any = Field(description="任务事实存储。")
+    remind_store: Any = Field(description="提醒事实存储。")
 
 
 class ToolManifest(BaseModel):
@@ -25,6 +19,7 @@ class ToolManifest(BaseModel):
     name: str = Field(description="工具注册名。")
     description: str = Field(description="工具用途说明。")
     action: str = Field(description="工具 action 名。")
+    object_label: str = Field(default="", description="工具作用对象名称，例如任务、提醒、画像。")
     command_pattern: str = Field(default="", description="命令式调用格式。")
     intent_examples: list[str] = Field(default_factory=list, description="自然语言触发示例。")
     tags: list[str] = Field(default_factory=list, description="工具标签。")
@@ -36,6 +31,7 @@ class ToolManifest(BaseModel):
     confirm_required: bool = Field(default=False, description="是否需要确认。")
     confirm_message: str = Field(default="", description="确认提示文案。")
     allow_nl_trigger: bool = Field(default=True, description="是否允许自然语言触发。")
+    direct_response: bool = Field(default=False, description="是否直接返回工具结果而不再交给 LLM 润色。")
 
     def to_prompt_block(self) -> str:
         """
@@ -75,24 +71,14 @@ class ToolResult(BaseModel):
     error: str = Field(default="", description="错误码或错误原因。")
 
 
+ToolHandler = Callable[[re.Match[str], ToolContext], ToolResult]
+ToolNormalizer = Callable[[ToolCall, ToolContext], ToolCall]
+
+
 class ToolBatchResult(BaseModel):
     """结构化批量工具执行结果。"""
 
     results: list[ToolResult] = Field(default_factory=list, description="批量执行结果列表。")
-
-
-class PendingAction(BaseModel):
-    """等待用户确认的高风险工具调用。"""
-
-    id: str = Field(description="待确认动作 ID。")
-    tool_calls: list[ToolCall] = Field(default_factory=list, description="待执行工具调用列表。")
-    confirm_message: str = Field(default="", description="确认提示文案。")
-    created_at: datetime = Field(default_factory=now_beijing, description="创建时间。")
-    expires_at: datetime = Field(
-        default_factory=lambda: now_beijing() + timedelta(minutes=10),
-        description="过期时间。",
-    )
-    source: str = Field(default="llm", description="待确认动作来源。")
 
 
 def build_manifest(
@@ -100,6 +86,7 @@ def build_manifest(
     *,
     description: str,
     action: str,
+    object_label: str = "",
     command_pattern: str,
     intent_examples: list[str],
     tags: list[str],
@@ -111,6 +98,7 @@ def build_manifest(
     confirm_required: bool = False,
     confirm_message: str = "",
     allow_nl_trigger: bool = True,
+    direct_response: bool = False,
 ) -> ToolManifest:
     """
     功能：构造统一格式的工具 manifest。
@@ -121,6 +109,7 @@ def build_manifest(
         name=name,
         description=description,
         action=action,
+        object_label=object_label,
         command_pattern=command_pattern,
         intent_examples=intent_examples,
         tags=tags,
@@ -132,6 +121,7 @@ def build_manifest(
         confirm_required=confirm_required,
         confirm_message=confirm_message,
         allow_nl_trigger=allow_nl_trigger,
+        direct_response=direct_response,
     )
 
 
@@ -162,6 +152,7 @@ class ToolRegistry:
         """
         self._handlers: dict[str, ToolHandler] = {}
         self._manifests: dict[str, ToolManifest] = {}
+        self._normalizers: dict[str, ToolNormalizer] = {}
 
     def register(self, name: str, handler: ToolHandler, manifest: ToolManifest | None = None) -> None:
         """
@@ -173,15 +164,30 @@ class ToolRegistry:
         if manifest is not None:
             self._manifests[name] = manifest
 
-    def execute(self, name: str, match: re.Match[str], ctx: ToolContext) -> str:
+    def register_normalizer(self, name: str, normalizer: ToolNormalizer) -> None:
+        """
+        功能：向注册表注册某个工具的参数归一化函数。
+        输入：工具名 `name`、归一化函数 `normalizer`。
+        输出：无，副作用是更新归一化器索引。
+        """
+        self._normalizers[name] = normalizer
+
+    def execute(self, name: str, match: re.Match[str], ctx: ToolContext) -> ToolResult:
         """
         功能：执行指定工具。
         输入：工具名 `name`、命令匹配结果 `match`、工具上下文 `ctx`。
-        输出：工具返回给用户的文本结果。
+        输出：工具返回的结构化执行结果。
         """
         handler = self._handlers.get(name)
         if handler is None:
-            return "[Tool] unsupported"
+            return ToolResult(
+                ok=False,
+                tool=name,
+                arguments={},
+                display_text="",
+                data={},
+                error="tool_not_found",
+            )
         return handler(match, ctx)
 
     def validate_tool_call(self, tool_call: ToolCall) -> tuple[bool, str]:
@@ -228,21 +234,12 @@ class ToolRegistry:
             )
         ordered_args = [str(tool_call.arguments.get(name, "")).strip() for name in manifest.arg_names]
         match = _ToolCallMatch(ordered_args)
-        raw = handler(match, ctx)
-        if isinstance(raw, ToolResult):
-            if not raw.tool:
-                raw.tool = tool_call.tool
-            if not raw.arguments:
-                raw.arguments = dict(tool_call.arguments)
-            return raw
-        return ToolResult(
-            ok=not str(raw).startswith("[Tool] unsupported"),
-            tool=tool_call.tool,
-            arguments=dict(tool_call.arguments),
-            display_text=str(raw),
-            data={"text": str(raw)},
-            error="" if not str(raw).startswith("[Tool] unsupported") else "tool_unsupported",
-        )
+        result = handler(match, ctx)
+        if not result.tool:
+            result.tool = tool_call.tool
+        if not result.arguments:
+            result.arguments = dict(tool_call.arguments)
+        return result
 
     def execute_calls(self, tool_calls: list[ToolCall], ctx: ToolContext) -> ToolBatchResult:
         """
@@ -268,6 +265,14 @@ class ToolRegistry:
         输出：`ToolManifest` 或 `None`。
         """
         return self._manifests.get(name)
+
+    def get_normalizer(self, name: str) -> ToolNormalizer | None:
+        """
+        功能：获取某个工具对应的参数归一化函数。
+        输入：工具名 `name`。
+        输出：归一化函数或 `None`。
+        """
+        return self._normalizers.get(name)
 
     def list_manifests(self) -> list[ToolManifest]:
         """

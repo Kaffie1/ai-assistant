@@ -3,7 +3,6 @@ const input = document.getElementById("input");
 const sendBtn = document.getElementById("sendBtn");
 const voiceBtn = document.getElementById("voiceBtn");
 const modeBadge = document.getElementById("modeBadge");
-const learnMeta = document.getElementById("learnMeta");
 let thinkingEl = null;
 let notificationTimer = null;
 let mediaRecorder = null;
@@ -188,14 +187,6 @@ async function sendMessageText(rawMessage) {
     const data = await res.json();
     hideThinking();
     addMessage("assistant", data.reply || "无回复");
-    const t = data.learn.tasks ?? 0;
-    const tm = data.learn.timing_ms || {};
-    const timing = Object.keys(tm).length
-      ? ` | timing=${Object.entries(tm)
-          .map(([k, v]) => `${k}:${Number(v).toFixed(1)}ms`)
-          .join(", ")}`
-      : "";
-    learnMeta.textContent = `[learn] extracted=${data.learn.extracted}, profile=${data.learn.profile}, tasks=${t}, reason=${data.learn.reason}${timing}`;
   } catch (err) {
     hideThinking();
     addMessage("assistant", `请求失败：${String(err)}`);

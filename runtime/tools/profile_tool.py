@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from capabilities.memory.persona.context import _delete_persona_line, _load_persona_lines
-from .base import ToolCall, ToolContext, ToolManifest, build_manifest
+from .base import ToolCall, ToolContext, ToolManifest, ToolResult, build_manifest
 
 
 def _parse_order_ref(text: str) -> int | None:
@@ -76,7 +76,7 @@ def normalize_profile_delete_call(tool_call: ToolCall, ctx: ToolContext) -> Tool
     )
 
 
-def handle_profile_list(_match: re.Match[str], ctx: ToolContext) -> str:
+def handle_profile_list(_match: re.Match[str], ctx: ToolContext) -> ToolResult:
     """
     功能：列出当前生效的用户画像事实。
     输入：命令匹配结果 `_match`、工具上下文 `ctx`。
@@ -84,14 +84,19 @@ def handle_profile_list(_match: re.Match[str], ctx: ToolContext) -> str:
     """
     facts = _ordered_profiles(ctx)
     if not facts:
-        return "[Profile] empty"
+        return ToolResult(ok=True, tool="profile_list", display_text="[Profile] empty", data={"items": []})
     lines = ["[Profile]"]
     for idx, fact in enumerate(facts, start=1):
         lines.append(f"- #{idx} | {fact}")
-    return "\n".join(lines)
+    return ToolResult(
+        ok=True,
+        tool="profile_list",
+        display_text="\n".join(lines),
+        data={"items": list(facts)},
+    )
 
 
-def handle_profile_delete(match: re.Match[str], ctx: ToolContext) -> str:
+def handle_profile_delete(match: re.Match[str], ctx: ToolContext) -> ToolResult:
     """
     功能：删除一条画像事实。
     输入：命令匹配结果 `match`、工具上下文 `ctx`。
@@ -100,9 +105,23 @@ def handle_profile_delete(match: re.Match[str], ctx: ToolContext) -> str:
     raw_ref = (match.group(1) or "").strip()
     fact_id = _resolve_profile_id(ctx, raw_ref)
     if not fact_id:
-        return f"[Profile] delete {raw_ref}: not_found"
+        return ToolResult(
+            ok=False,
+            tool="profile_delete",
+            arguments={"id": raw_ref},
+            display_text=f"[Profile] delete {raw_ref}: not_found",
+            data={"id": raw_ref, "deleted": False},
+            error="not_found",
+        )
     ok = _delete_persona_line(int(fact_id))
-    return f"[Profile] delete #{fact_id}: {'ok' if ok else 'not_found'}"
+    return ToolResult(
+        ok=ok,
+        tool="profile_delete",
+        arguments={"id": raw_ref},
+        display_text=f"[Profile] delete #{fact_id}: {'ok' if ok else 'not_found'}",
+        data={"id": fact_id, "deleted": ok},
+        error="" if ok else "not_found",
+    )
 
 
 PROFILE_MANIFESTS: dict[str, ToolManifest] = {
@@ -110,6 +129,7 @@ PROFILE_MANIFESTS: dict[str, ToolManifest] = {
         "profile_list",
         description="查看当前生效的用户画像事实。",
         action="profile_list",
+        object_label="画像",
         command_pattern="/profile list",
         intent_examples=["我的偏好有哪些", "查看画像", "当前记住了什么偏好"],
         tags=["profile", "list", "memory"],
@@ -117,11 +137,13 @@ PROFILE_MANIFESTS: dict[str, ToolManifest] = {
         arg_names=[],
         required_args=[],
         args_schema={},
+        direct_response=False,
     ),
     "profile_delete": build_manifest(
         "profile_delete",
         description="删除一条画像事实。",
         action="profile_delete",
+        object_label="画像",
         command_pattern="/profile delete <id>",
         intent_examples=["删除这条画像", "清除偏好记录", "删除第三条画像", "删除第三和第四点画像"],
         tags=["profile", "delete", "memory"],
@@ -132,5 +154,6 @@ PROFILE_MANIFESTS: dict[str, ToolManifest] = {
         args_schema={"id": "画像序号，支持 3、第三个等"},
         confirm_required=True,
         confirm_message="将删除这条画像记忆，是否确认？",
+        direct_response=True,
     ),
 }

@@ -7,7 +7,7 @@ from threading import Lock
 from foundation.config import MAMGA_PROFILE_MEMORY_PATH
 
 _STORE_LOCK = Lock()
-_PERSONA_CONTEXT = ""
+_PERSONA_CONTEXT: list[str] = []
 
 
 def _store_path() -> Path:
@@ -60,9 +60,8 @@ def _save_persona_lines(lines: list[str]) -> None:
     """
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        for line in lines:
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    with path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(lines, ensure_ascii=False, indent=2))
 
 
 def _delete_persona_line(index: int) -> bool:
@@ -85,8 +84,10 @@ def build_persona_memory_context() -> str:
     输入：无。
     输出：画像上下文文本；无内容时返回空字符串。
     """
+
+    global _PERSONA_CONTEXT
     with _STORE_LOCK:
-        if _PERSONA_CONTEXT == "":
+        if not _PERSONA_CONTEXT:
             _PERSONA_CONTEXT = _load_persona_lines()
     return "\n".join(_PERSONA_CONTEXT)
 
@@ -97,9 +98,13 @@ def append_persona_memory(text: str) -> None:
     输入：画像文本 `text`。
     输出：无，副作用是把画像内容追加写入 JSON 文件。
     """
+
+    global _PERSONA_CONTEXT
     line = _normalize_persona_text(text)
     if not line:
         return
     with _STORE_LOCK:
+        if not _PERSONA_CONTEXT:
+            _PERSONA_CONTEXT = _load_persona_lines()
         _PERSONA_CONTEXT.append(line)
-        _save_persona_lines(line)
+        _save_persona_lines(_PERSONA_CONTEXT)

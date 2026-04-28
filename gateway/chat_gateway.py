@@ -1,31 +1,29 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from context import build_chat_context
+from pydantic import BaseModel, Field
 from workflow.graph import run_assistant_graph
 
 
-@dataclass(slots=True)
-class ChatGatewayResult:
+class ChatGatewayResult(BaseModel):
     """
     对外聊天入口的统一返回结果，供 Web/CLI/API 层直接消费。
     """
 
-    reply: str
-    mode: str
+    reply: str = Field(default="", description="最终回复文本。")
+    mode: str = Field(default="", description="回复模式。")
 
 
-@dataclass(slots=True)
-class GatewayMessage:
+class GatewayMessage(BaseModel):
     """
     外部消息的统一内部格式。
     """
 
-    source: str
-    text: str = ""
-    metadata: dict[str, Any] | None = None
+    source: str = Field(default="cli", description="消息来源。")
+    text: str = Field(default="", description="消息文本。")
+    metadata: dict[str, Any] | None = Field(default=None, description="附加元数据。")
 
     def run(
         self,
@@ -33,14 +31,17 @@ class GatewayMessage:
         """
         统一消息执行入口：由标准化消息负责拼接上下文并驱动 workflow。
         """
-        chat_context = build_chat_context(user_text=self.text)
+        thread_id = str((self.metadata or {}).get("thread_id") or f"{self.source}-default").strip()
+        chat_context = build_chat_context(user_text=self.text, source=self.source)
         final_state = run_assistant_graph(
             context=chat_context,
+            thread_id=thread_id,
         )
         return ChatGatewayResult(
             reply=str(final_state.get("reply_text", "") or ""),
             mode=str(final_state.get("mode", "") or ""),
         )
+
 
 class CliGateway:
     """
@@ -48,10 +49,14 @@ class CliGateway:
     """
 
     def __init__(self) -> None:
-        pass
+        self._thread_id = "cli-default"
 
     def process_chat(self, user_text: str) -> ChatGatewayResult:
-        return GatewayMessage(source="cli", text=str(user_text or "").strip()).run()
+        return GatewayMessage(
+            source="cli",
+            text=str(user_text or "").strip(),
+            metadata={"thread_id": self._thread_id},
+        ).run()
 
 
 class WebGateway:
@@ -60,7 +65,11 @@ class WebGateway:
     """
 
     def __init__(self) -> None:
-        pass
+        self._thread_id = "web-default"
 
     def process_chat(self, user_text: str) -> "ChatGatewayResult":
-        return GatewayMessage(source="web", text=str(user_text or "").strip()).run()
+        return GatewayMessage(
+            source="web",
+            text=str(user_text or "").strip(),
+            metadata={"thread_id": self._thread_id},
+        ).run()

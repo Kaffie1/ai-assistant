@@ -85,6 +85,10 @@ MAMGA_FACT_DB_PATH = _env_str("MAMGA_FACT_DB_PATH", "./data/facts.db") or "./dat
 # Runtime
 MAMGA_RECENT_CONVERSATION_PATH = _env_str("MAMGA_RECENT_CONVERSATION_PATH", "./data/recent_conversation") or "./data/recent_conversation"
 MAMGA_PROFILE_MEMORY_PATH = _env_str("MAMGA_PROFILE_MEMORY_PATH", "./data/profile_memory.json") or "./data/profile_memory.json"
+MAMGA_LONG_TERM_MEMORY_DB_PATH = _env_str("MAMGA_LONG_TERM_MEMORY_DB_PATH", "./data/long_term_memory.db") or "./data/long_term_memory.db"
+MAMGA_LONG_TERM_MEMORY_RULES_PATH = _env_str("MAMGA_LONG_TERM_MEMORY_RULES_PATH", "./data/long_term_memory_rules.json") or "./data/long_term_memory_rules.json"
+MAMGA_TASK_MEMORY_MD_PATH = _env_str("MAMGA_TASK_MEMORY_MD_PATH", "./data/task_memory.md") or "./data/task_memory.md"
+MAMGA_REMINDER_MEMORY_MD_PATH = _env_str("MAMGA_REMINDER_MEMORY_MD_PATH", "./data/reminder_memory.md") or "./data/reminder_memory.md"
 
 # Paths
 MAMGA_LOG_DIR = _env_str("MAMGA_LOG_DIR", "./data/logs") or "./data/logs"

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
 from foundation.config import MAMGA_CHROMA_DIR, MAMGA_COLLECTION, MAMGA_VECTOR_BACKEND
 from .embeddings import EmbeddingProvider, HashEmbeddingProvider, build_embedding_provider_from_env
@@ -23,16 +22,14 @@ def _safe_collection_suffix(provider_name: str) -> str:
     return cleaned or "default"
 
 
-@dataclass(slots=True)
 class HashVectorStore(VectorStoreProtocol):
-    embedding_provider: EmbeddingProvider
-
-    def __post_init__(self) -> None:
+    def __init__(self, embedding_provider: EmbeddingProvider) -> None:
         """
         功能：初始化 hash 向量后端的内存索引。
-        输入：无。
+        输入：embedding 提供方 `embedding_provider`。
         输出：无，创建内部向量字典。
         """
+        self.embedding_provider = embedding_provider
         self._vecs: dict[str, list[float]] = {}
 
     @property

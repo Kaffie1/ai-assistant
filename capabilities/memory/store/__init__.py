@@ -6,16 +6,9 @@ from __future__ import annotations
 输出：无，供上层通过 `capabilities.memory.store` 直接导入。
 """
 
-from capabilities.memory.store.core import (
-    FactStoreStack,
-    InMemoryReminderStore,
-    InMemoryTaskStore,
-    ReminderFact,
-    ReminderStoreProtocol,
-    TaskFact,
-    TaskStoreProtocol,
-    build_fact_store_stack,
-)
+from capabilities.memory.store.core import FactStoreStack, build_fact_store_stack
+from capabilities.memory.store.reminder_store import InMemoryReminderStore, ReminderFact, ReminderStoreProtocol
+from capabilities.memory.store.task_store import InMemoryTaskStore, TaskFact, TaskStoreProtocol
 from capabilities.memory.store.time_parser import resolve_due_date, resolve_remind_at
 
 __all__ = [
